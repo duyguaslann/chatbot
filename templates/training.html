@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <title>Model Eğitimi</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/selectize@0.12.6/dist/css/selectize.default.css">
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+        }
+        th, td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            padding: 10px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            flex: 1;
+            min-height: 100px;
+    }
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+        .form-container {
+            padding: 15px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            background-color: #fff;   }
+
+        .input-group-wrapper {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+    }
+
+        .bottom-sections-wrapper {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 30px; /* İki form-container arası boşluk
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+
+
+        .bottom-sections-wrapper > .form-container {
+            flex: 1;
+            min-width: 300px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="form-container">
+    <h3>Model Eğitimi Başlat</h3>
+    <label for="model-select">Eğitilecek modeli seçin:</label>
+    <select id="model-select" placeholder="Model seçin..."></select>
+    <br><br>
+    <button id="trainButton">Eğit</button>
+</div>
+
+<h2>Fine-tuning Soru-Cevap Verileri</h2>
+<button onclick="loadJsonl()">JSONL Dosyasını Yükle</button>
+
+<table id="qa-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Soru (Prompt)</th>
+            <th>Cevap (Completion)</th>
+            <th>Tarih</th>
+            <th>İşlem</th>
+        </tr>
+    </thead>
+    <tbody id="qa-tbody">
+    </tbody>
+</table>
+
+<div class="bottom-sections-wrapper">
+    <div class="form-container">
+        <h3>Yeni Soru-Cevap Ekle</h3>
+        <div class="input-group-wrapper">
+            <textarea id="prompt" placeholder="Soru yazın (prompt)"></textarea>
+            <textarea id="completion" placeholder="Cevap yazın (completion)"></textarea>
+        </div>
+        <button onclick="addEntry()">Ekle</button>
+    </div>
+
+    <div class="form-container">
+        <h3>Excel ile Soru-Cevap Yükle</h3>
+        <form id="excel-upload-form" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".xlsx" required />
+            <button type="submit">Excel Yükle</button>
+        </form>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/selectize@0.12.6/dist/js/standalone/selectize.min.js"></script>
+
+<script>
+ document.addEventListener("DOMContentLoaded", async function () {
+    loadData(); // Soru-cevapları getir
+    await loadModels(); // Model listesini getir ve selectize ile başlat
+
+    document.getElementById("trainButton").addEventListener("click", async () => {
+        const selectedModelId = $('#model-select')[0].selectize.getValue();
+
+        if (!selectedModelId) {
+            alert("Lütfen eğitilecek bir model seçin.");
+            return;
+        }
+
+        try {
+            const res = await fetch("/api/train", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ base_model_id: selectedModelId })
+            });
+
+            const data = await res.json();  // **BURASI EKLENDİ**
+
+            if (data.job_id) {
+                alert("Eğitim başlatıldı. Job ID: " + data.job_id);
+                checkTrainingStatus(data.job_id);  // Canlı izlemeyi başlat
+            } else {
+                alert("Eğitim başlatıldı: " + data.status);
+            }
+
+        } catch (err) {
+            alert("Eğitim sırasında hata oluştu: " + err.message);
+        }
+    });
+});
+
+async function loadModels() {
+    try {
+        const res = await fetch("/api/models");
+        const models = await res.json();
+
+        $('#model-select').selectize({
+            options: models.map(m => ({ value: m.id, text: m.name })),
+            valueField: 'value',
+            labelField: 'text',
+            searchField: 'text',
+            create: false
+        });
+    } catch (err) {
+        alert("Model listesi alınamadı: " + err.message);
+    }
+}
+
+async function loadJsonl() {
+    try {
+        const res = await fetch("/load-jsonl", { method: "POST" });
+        const data = await res.json();
+        alert(data.message);
+        if (data.status === "success") loadData();
+    } catch (error) {
+        alert("Yükleme sırasında hata: " + error.message);
+    }
+}
+
+async function checkTrainingStatus(jobId) {
+    try {
+        const res = await fetch(`/api/train/status/${jobId}`);
+        const data = await res.json();
+
+        if (data.error) {
+            alert("Durum sorgulanırken hata: " + data.error);
+            return;
+        }
+
+        const status = data.status;
+        console.log("Eğitim durumu:", status);
+
+        if (status === "succeeded") {
+            alert("Eğitim tamamlandı!");
+            // Burada istersen UI güncellemesi yapabilirsin
+        } else if (status === "failed") {
+            alert("Eğitim başarısız oldu!");
+        } else {
+            // Eğitim devam ediyor
+        trainingStatusInterval = setInterval(() => checkTrainingStatus(jobId), 180000); //3dk kontrol
+        }
+    } catch (err) {
+        alert("Durum sorgulama hatası: " + err.message);
+    }
+}
+
+async function loadData() {
+    try {
+        const res = await fetch("/training/data");
+        if (!res.ok) throw new Error("Veri alınamadı");
+        const data = await res.json();
+
+        const tbody = document.querySelector("#qa-tbody");
+        tbody.innerHTML = "";
+
+        data.forEach((item, index) => {
+            const row = `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>${item.prompt}</td>
+                    <td>${item.completion}</td>
+                    <td>${item.created_at}</td>
+                    <td><button onclick="deleteEntry(${item.id})">Sil</button></td>
+                </tr>`;
+            tbody.innerHTML += row;
+        });
+    } catch (error) {
+        alert("Tablo yüklenirken hata oluştu: " + error.message);
+    }
+}
+
+async function addEntry() {
+    const prompt = document.getElementById("prompt").value.trim();
+    const completion = document.getElementById("completion").value.trim();
+
+    if (!prompt || !completion) {
+        alert("Lütfen hem soru hem cevap yazın.");
+        return;
+    }
+
+    try {
+        const res = await fetch("/training/data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt, completion })
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+            alert(result.error || "Kayıt eklenirken hata oluştu.");
+            return;
+        }
+
+        alert("Kayıt başarıyla eklendi!");
+        document.getElementById("prompt").value = "";
+        document.getElementById("completion").value = "";
+        loadData();
+    } catch (error) {
+        alert("Kayıt eklenirken hata oluştu: " + error.message);
+    }
+}
+
+async function deleteEntry(id) {
+    if (!confirm("Bu kaydı silmek istediğinize emin misiniz?")) return;
+
+    try {
+        const res = await fetch(`/training/data/${id}`, {
+            method: "DELETE"
+        });
+
+        const result = await res.json();
+        if (!res.ok) {
+            alert(result.error || "Silme sırasında hata oluştu.");
+            return;
+        }
+
+        alert("Kayıt başarıyla silindi.");
+        loadData();
+    } catch (error) {
+        alert("Silme sırasında hata oluştu: " + error.message);
+    }
+}
+document.getElementById("excel-upload-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+
+    const formData = new FormData(this);
+
+    try {
+        const res = await fetch("/upload-excel", {
+            method: "POST",
+            body: formData
+        });
+
+        const result = await res.json();
+        if (result.status === "success") {
+            alert("Excel verisi başarıyla yüklendi.");
+            loadData(); // tabloyu güncelle
+        } else {
+            alert(result.message || "Yükleme sırasında hata oluştu.");
+        }
+    } catch (err) {
+        alert("Yükleme sırasında bir hata oluştu: " + err.message);
+    }
+});
+
+</script>
+</body>
+</html>

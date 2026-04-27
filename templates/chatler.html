@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Chatbot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+  .switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+    li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    li span {
+      flex-grow: 1;
+      margin-right: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    li button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      margin-left: 5px;
+      color: #c00;
+      font-size: 1.1em;
+    }
+    li button:hover {
+      color: #900;
+    }
+  </style>
+</head>
+<body>
+
+<button id="menu-btn">Menu</button>
+
+<div class="sidebar" style="width: 250px;">
+  <div style="position: relative; margin: 40px 0 12px 0; width: 100%;">
+    <i class="fa-solid fa-magnifying-glass"
+       style="position: absolute; top: 50%; left: 10px; transform: translateY(-50%); color: #888;"></i>
+
+    <input type="text" id="chat-search" placeholder="Sohbetlerde ara..."
+      style="width: 100%; padding: 8px 70px 8px 32px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box;" />
+
+    <div class="search-nav" style="position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: flex; gap: 4px;">
+      <button id="chat-prev-btn" title="Önceki" style="background: none; border: none; cursor: pointer;">
+        <i class="fa-solid fa-chevron-up"></i>
+      </button>
+      <button id="chat-next-btn" title="Sonraki" style="background: none; border: none; cursor: pointer;">
+        <i class="fa-solid fa-chevron-down"></i>
+      </button>
+    </div>
+  </div>
+
+  <ul id="chat-list"></ul>
+  <button id="new-chat-btn">Yeni Chat</button>
+</div>
+
+
+
+
+<div class="message-limit" id="message-limit"
+     style="position: absolute; top: 10px; right: 10px; font-size: 14px; color: #444;"></div>
+
+
+<div class="chat-container">
+  <div class="chat-header">Chatbot
+      <label class="switch" style="margin-left: 20px; vertical-align: middle;">
+    <input type="checkbox" id="providerToggle" checked />
+    <span class="slider"></span>
+  </label>
+  <span id="providerLabel" style="font-weight: bold; margin-left: 8px; vertical-align: middle;">OpenAI</span>
+</div>
+
+  <div class="chat-box" id="chat-box"></div>
+<div class="message-search-container">
+  <div class="search-bar">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <input type="text" id="message-search" placeholder="Search in messages" />
+    <div class="search-nav">
+      <button id="prev-match-btn" title="Önceki"><i class="fa-solid fa-chevron-up"></i></button>
+      <button id="next-match-btn" title="Sonraki"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+  </div>
+</div>
+
+  <div class="chat-input">
+    <button id="btn-time" title="Tarih ve Saat">
+      <i class="fa-solid fa-calendar-days"></i>
+    </button>
+    <button id="btn-dolar" title="Dolar Çevir">
+      <i class="fa-solid fa-dollar-sign"></i>
+    </button>
+    <input type="text" id="user-input" placeholder="Type your message.." />
+    <button id="send-btn" title="Gönder">
+      <i class="fa-solid fa-paper-plane"></i>
+    </button>
+    <button id="clear-history-btn" title="Geçmişi Sil">
+      <i class="fa-solid fa-clock-rotate-left"></i>
+    </button>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const sidebar = document.querySelector('.sidebar');
+  const menuBtn = document.getElementById('menu-btn');
+  const chatContainer = document.querySelector('.chat-container');
+  const chatList = document.getElementById('chat-list');
+  const newChatBtn = document.getElementById('new-chat-btn');
+  const chatBox = document.getElementById('chat-box');
+  const input = document.getElementById('user-input');
+  const sendBtn = document.getElementById('send-btn');
+  const chatFilterInput = document.getElementById('chat-search');
+  const chatPrevBtn = document.getElementById('chat-prev-btn');
+  const chatNextBtn = document.getElementById('chat-next-btn');
+  const messageSearchInput = document.getElementById("message-search");
+  const nextMatchBtn = document.getElementById("next-match-btn");
+  const prevMatchBtn = document.getElementById("prev-match-btn");
+  const toggle = document.getElementById('providerToggle');
+  const label = document.getElementById('providerLabel');
+  const clearHistoryBtn = document.getElementById('clear-history-btn');
+  const btnTime = document.getElementById("btn-time");
+  const btnDolar = document.getElementById("btn-dolar");
+
+  let currentChatId = null;
+
+  // Yükleme balonu ekle
+  function addLoadingBubble() {
+    const bubble = document.createElement("div");
+    bubble.className = "message bot loading-bubble typing-dots";
+    bubble.id = "loading-bubble";
+    bubble.innerHTML = `<span>.</span><span>.</span><span>.</span>`;
+    chatBox.appendChild(bubble);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  // Yükleme balonunu kaldır
+  function removeLoadingBubble() {
+    const bubble = document.getElementById("loading-bubble");
+    if (bubble) bubble.remove();
+  }
+  // Mesaj limiti gösterimi güncelle
+  async function updateMessageLimitDisplay() {
+    try {
+      const res = await fetch('/message-limit');
+      if (!res.ok) return;
+      const data = await res.json();
+      const div = document.getElementById('message-limit');
+      if (div) div.textContent = `${data.used} / ${data.limit}  message limit`;
+    } catch (err) {
+      console.error("Mesaj limiti bilgisi alınamadı:", err);
+    }
+  }
+
+  // Chat listesini yükle
+  async function loadChats() {
+    try {
+      const res = await fetch('/chats');
+      const chats = await res.json();
+      chatList.innerHTML = '';
+      chats.forEach(addChatToList);
+      if (chats.length > 0) selectChat(chats[0].id);
+    } catch (err) {
+      alert("Chatler yüklenirken hata: " + err.message);
+    }
+  }
+
+  // Chat listesindeki bir elemana ekleme yap
+  function addChatToList(chat) {
+    const li = document.createElement('li');
+    li.dataset.chatId = chat.id || chat.chat_id;
+
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = chat.title || "Yeni Sohbet";
+    li.appendChild(titleSpan);
+
+    // Düzenle butonu
+    const editBtn = document.createElement('button');
+    editBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i>';
+    editBtn.title = "Düzenle";
+
+    // Sil butonu
+    const deleteBtn = document.createElement('button');
+    deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+    deleteBtn.title = "Sil";
+    deleteBtn.style.color = "#c00";
+
+    // Düzenleme işlemi
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+
+      const input = document.createElement('input');
+      input.value = titleSpan.textContent;
+
+      li.innerHTML = '';
+      li.appendChild(input);
+      li.appendChild(editBtn);
+      li.appendChild(deleteBtn);
+
+      input.focus();
+
+      input.onblur = async () => {
+        const newTitle = input.value.trim();
+        if (newTitle) {
+          try {
+            const res = await fetch(`/chat/${li.dataset.chatId}/title`, {
+              method: 'PUT',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({title: newTitle})
+            });
+            if (res.ok) {
+              titleSpan.textContent = newTitle;
+            } else {
+              throw new Error();
+            }
+          } catch {
+            alert("Başlık güncellenemedi.");
+          }
+        }
+        li.innerHTML = '';
+        li.appendChild(titleSpan);
+        li.appendChild(editBtn);
+        li.appendChild(deleteBtn);
+      };
+    });
+
+    // Silme işlemi
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm("Bu sohbeti silmek istediğinizden emin misiniz?")) {
+        try {
+          const res = await fetch(`/chat/${li.dataset.chatId}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error("Sohbet silinemedi");
+          li.remove();
+          if (currentChatId === li.dataset.chatId) {
+            chatBox.innerHTML = "";
+            currentChatId = null;
+          }
+        } catch (err) {
+          alert(err.message);
+        }
+      }
+    });
+
+    li.addEventListener('click', () => {
+      selectChat(li.dataset.chatId);
+    });
+
+    li.appendChild(editBtn);
+    li.appendChild(deleteBtn);
+    chatList.appendChild(li);
+  }
+
+// Chat seçme ve mesajları yükleme
+async function selectChat(chatId) {
+  currentChatId = chatId;
+
+  [...chatList.children].forEach(li => {
+    li.classList.toggle('active', li.dataset.chatId == chatId);
+  });
+
+  chatBox.innerHTML = "";
+
+
+  try {
+    const res = await fetch(`/history/${chatId}`);
+    const data = await res.json();
+
+    const filterKeyword = chatFilterInput && chatFilterInput.value
+      ? chatFilterInput.value.toLowerCase()
+      : "";
+
+    let firstMatchMessage = null;
+
+    data.history.forEach(msg => {
+      const sender = msg.user_type === 0 ? "bot" : "user";
+      const msgText = msg.message_text;
+
+      const div = document.createElement('div');
+      div.className = "message " + sender;
+      div.textContent = msgText;
+
+      if (filterKeyword && msgText.toLowerCase().includes(filterKeyword)) {
+        div.classList.add('highlight');
+        if (!firstMatchMessage) firstMatchMessage = div;
+      }
+
+      chatBox.appendChild(div);
+    });
+
+    if (filterKeyword) highlightMatches(filterKeyword);
+
+    if (firstMatchMessage) {
+      firstMatchMessage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  } catch (err) {
+    alert("Mesajlar yüklenemedi: " + err.message);
+  }
+
+}
+
+
+  // Mesaj gönderme fonksiyonu
+  async function sendMessage(messageText) {
+    input.value = messageText;
+    sendBtn.click();
+  }
+
+  // Mesaj gönderme butonu
+  sendBtn.addEventListener('click', async () => {
+    const message = input.value.trim();
+    updateMessageLimitDisplay();
+
+    if (!message) return;
+
+    if (!currentChatId) {
+      alert("Lütfen önce bir sohbet seçin veya yeni sohbet oluşturun.");
+      return;
+    }
+
+    chatBox.innerHTML += `<div class="message user">${message}</div>`;
+    input.value = "";
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    addLoadingBubble();
+
+    try {
+      const res = await fetch(`/chat/${currentChatId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message})
+      });
+
+      const data = await res.json();
+      removeLoadingBubble();
+
+      if (!res.ok) throw new Error(data.error || "Mesaj gönderilemedi");
+
+      chatBox.innerHTML += `<div class="message bot">${data.reply}</div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      updateMessageLimitDisplay();
+    } catch (err) {
+      removeLoadingBubble();
+      chatBox.innerHTML += `<div class="message bot error">Hata: ${err.message}</div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+  });
+
+  // Yeni sohbet oluşturma
+  newChatBtn.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/chat/create', { method: 'POST' });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Yeni chat oluşturulamadı");
+      }
+      const data = await res.json();
+
+      addChatToList({
+        id: data.chat_id,
+        user_id: data.user_id,
+        title: data.title
+      });
+
+      selectChat(data.chat_id);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  // Menü butonu toggle sidebar
+  menuBtn.addEventListener('click', () => {
+    const isHidden = sidebar.classList.toggle('hidden');
+    if (isHidden) {
+      chatContainer.classList.remove('shifted');
+    } else {
+      chatContainer.classList.add('shifted');
+    }
+  });
+
+  // Chat listesi filtreleme (başlığa göre)
+chatFilterInput.addEventListener('input', async () => {
+  const keyword = chatFilterInput.value.trim().toLowerCase();
+  const items = chatList.querySelectorAll("li");
+
+  // Başlıkları sıfırla (vurguları kaldır)
+  items.forEach(li => {
+    const span = li.querySelector("span");
+    if (span) span.innerHTML = span.textContent;
+  });
+
+  if (!keyword) {
+    // Filtre boşsa tüm sohbetleri göster
+    items.forEach(li => li.style.display = "flex");
+    return;
+  }
+
+  const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+
+  for (const li of items) {
+    const span = li.querySelector("span");
+    const chatId = li.dataset.chatId;
+    const titleText = span.textContent.toLowerCase();
+
+    let matched = false;
+
+    // Başlıkta arama
+    if (titleText.includes(keyword)) matched = true;
+
+/*
+    // İçerikte arama
+   try {
+    const res = await fetch(`/history/${chatId}`);
+    if (res.ok) {
+      const data = await res.json();
+      for (const msg of data.history) {
+        const text = msg.message_text || "";
+        if (text.toLowerCase().includes(keyword)) {
+          matched = true;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Mesajlar alınamadı:", err);
+  }
+
+*/
+
+    if (matched) {
+      // Vurgula
+      span.innerHTML = span.textContent.replace(regex, `<span class="marked">$1</span>`);
+      li.style.display = "flex";
+    } else {
+      li.style.display = "none";
+    }
+  }
+});
+
+
+  // Mesaj arama ve vurgulama
+  let matchedMessages = [];
+  let currentMatchIndex = -1;
+
+function clearHighlights() {
+  matchedSpans.forEach(span => {
+    span.classList.remove("marked", "active");
+
+  });
+  matchedSpans = [];
+  currentIndex = -1;
+}
+
+  function highlightMatches(keyword) {
+    matchedMessages = [];
+    currentMatchIndex = -1;
+
+    const messages = chatBox.querySelectorAll(".message");
+    messages.forEach(msg => {
+    if ((msg.message_text || "").toLowerCase().includes(keyword)) {
+        matchedMessages.push(msg);
+      }
+    });
+
+    matchedMessages.forEach(msg => msg.classList.add("highlight"));
+
+    if (matchedMessages.length > 0) {
+      currentMatchIndex = 0;
+      highlightCurrentMatch();
+    }
+  }
+
+  function highlightCurrentMatch() {
+    clearHighlights();
+
+    matchedMessages.forEach(msg => msg.classList.add("highlight"));
+    const active = matchedMessages[currentMatchIndex];
+    if (active) {
+      active.classList.add("active-match");
+      active.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  messageSearchInput.addEventListener("input", () => {
+    const keyword = messageSearchInput.value.trim().toLowerCase();
+    clearHighlights();
+    if (!keyword) return;
+    highlightMatches(keyword);
+  });
+
+  nextMatchBtn.addEventListener("click", () => {
+    if (matchedMessages.length === 0) return;
+
+    currentMatchIndex = (currentMatchIndex + 1) % matchedMessages.length;
+    highlightCurrentMatch();
+  });
+
+  prevMatchBtn.addEventListener("click", () => {
+    if (matchedMessages.length === 0) return;
+
+    currentMatchIndex = (currentMatchIndex - 1 + matchedMessages.length) % matchedMessages.length;
+    highlightCurrentMatch();
+  });
+
+
+
+
+
+ let chatMatches = [];
+let chatCurrentIndex = -1;
+
+function clearChatHighlights() {
+  chatMatches.forEach(li => {
+    li.classList.remove('highlight', 'active-match');
+  });
+  chatMatches = [];
+  chatCurrentIndex = -1;
+}
+
+function highlightChatMatches(keyword) {
+  clearChatHighlights();
+
+  if (!keyword) return;
+
+  const items = chatList.querySelectorAll('li');
+
+  items.forEach(li => {
+    if (li.textContent.toLowerCase().includes(keyword.toLowerCase())) {
+      chatMatches.push(li);
+      li.classList.add('highlight');
+    }
+  });
+
+  if (chatMatches.length > 0) {
+    chatCurrentIndex = 0;
+    setActiveChatMatch();
+  }
+}
+
+function setActiveChatMatch() {
+  chatMatches.forEach(li => li.classList.remove('active-match'));
+  if (chatMatches[chatCurrentIndex]) {
+    chatMatches[chatCurrentIndex].classList.add('active-match');
+    chatMatches[chatCurrentIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+// Input arama dinleyicisi
+chatFilterInput.addEventListener('input', () => {
+  const keyword = chatFilterInput.value.trim();
+  if (!keyword) {
+    clearChatHighlights();
+    return;
+  }
+  highlightChatMatches(keyword);
+});
+
+// İleri/Geri butonları
+chatNextBtn.addEventListener('click', () => {
+  if (chatMatches.length === 0) return;
+  chatCurrentIndex = (chatCurrentIndex + 1) % chatMatches.length;
+  setActiveChatMatch();
+});
+chatPrevBtn.addEventListener('click', () => {
+  if (chatMatches.length === 0) return;
+  chatCurrentIndex = (chatCurrentIndex - 1 + chatMatches.length) % chatMatches.length;
+  setActiveChatMatch();
+});
+
+// Ok tuşlarıyla gezinme
+chatFilterInput.addEventListener('keydown', (e) => {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    chatNextBtn.click();
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    chatPrevBtn.click();
+  }
+});
+
+
+
+  // Sağ üstte provider toggle ve backend'e gönder
+  toggle.checked = true;
+  label.textContent = "OpenAI";
+
+  toggle.addEventListener('change', () => {
+    if (toggle.checked) {
+      label.textContent = "OpenAI";
+    } else {
+      label.textContent = "Groq";
+    }
+
+    fetch('/set-provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: toggle.checked ? 'openai' : 'groq' })
+    }).then(res => {
+      if (!res.ok) alert("Provider seçimi backend'e gönderilemedi!");
+    }).catch(() => alert("Provider seçimi backend'e gönderilemedi!"));
+
+    console.log("Seçilen provider:", toggle.checked ? "OpenAI" : "Groq");
+  });
+
+  // Input içinde komut algıla ve renklendir
+  input.addEventListener("input", () => {
+    const value = input.value.toLowerCase();
+    const komutlar = ["saat kaç", "dolar", "dolara çevir", "kaç dolar", "tarih ne"];
+    const komutAlgılandı = komutlar.some(komut => value.includes(komut));
+
+    if (komutAlgılandı) {
+      input.classList.add("command-detected");
+    } else {
+      input.classList.remove("command-detected");
+    }
+  });
+
+  // Mesaj içindeki kelimeyi vurgulama
+
+    let matchedSpans = [];
+    let currentIndex = -1;
+
+    function clearMessageHighlights() {
+      const messages = chatBox.querySelectorAll(".message");
+      messages.forEach(msg => {
+        msg.innerHTML = msg.textContent;
+      });
+      matchedSpans = [];
+      currentIndex = -1;
+    }
+// Mesaj içi eşleşmeleri vurgula
+    function highlightMatches(keyword) {
+    clearMessageHighlights();
+
+      if (!keyword) return;
+
+      const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+      const messages = chatBox.querySelectorAll(".message");
+
+      messages.forEach(msg => {
+        const originalText = msg.textContent;
+        if (regex.test(originalText)) {
+          msg.innerHTML = originalText.replace(regex, `<span class="marked">$1</span>`);
+        }
+      });
+
+      matchedSpans = chatBox.querySelectorAll(".marked");
+      if (matchedSpans.length > 0) {
+        currentIndex = 0;
+        scrollToActiveMatch();
+      }
+    }
+
+    function scrollToActiveMatch() {
+      matchedSpans.forEach(span => span.classList.remove("active"));
+      const currentSpan = matchedSpans[currentIndex];
+      if (currentSpan) {
+        currentSpan.classList.add("active");
+        currentSpan.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+
+    messageSearchInput.addEventListener("input", () => {
+      const keyword = messageSearchInput.value.trim().toLowerCase();
+      if (!keyword) {
+        clearHighlights();
+        return;
+      }
+      highlightMatches(keyword);
+    });
+
+    nextMatchBtn.addEventListener("click", () => {
+      if (matchedSpans.length === 0) return;
+      currentIndex = (currentIndex + 1) % matchedSpans.length;
+      scrollToActiveMatch();
+    });
+
+    prevMatchBtn.addEventListener("click", () => {
+      if (matchedSpans.length === 0) return;
+      currentIndex = (currentIndex - 1 + matchedSpans.length) % matchedSpans.length;
+      scrollToActiveMatch();
+    });
+
+    messageSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        nextMatchBtn.click();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        prevMatchBtn.click();
+      }
+    });
+
+
+  // Enter ile gönder
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendBtn.click();
+  });
+
+  // Mesaj geçmişini temizleme
+  clearHistoryBtn.addEventListener('click', async () => {
+    if (!currentChatId) {
+      alert("Lütfen önce bir sohbet seçin.");
+      return;
+    }
+
+    const confirmDelete = confirm("Bu sohbetin tüm geçmişini silmek istediğinizden emin misiniz?");
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`/chat/${currentChatId}/clear_history`, { method: 'POST' });
+      const data = await res.json();
+
+      if (res.ok) {
+        alert(data.detail || "Geçmiş silindi.");
+        chatBox.innerHTML = "";
+      } else {
+        alert("Geçmiş silinirken hata oluştu.");
+      }
+    } catch (err) {
+      alert("Hata: " + err.message);
+    }
+  });
+
+  // Saat kaç butonu
+  btnTime.addEventListener("click", () => {
+    sendMessage("saat kaç");
+  });
+
+  // Dolar çevir butonu
+  btnDolar.addEventListener("click", () => {
+    const value = input.value.trim();
+    if (value) {
+      sendMessage(`dolara çevir ${value}`);
+    } else {
+      alert("Lütfen önce bir miktar girin.");
+    }
+  });
+
+  // İlk yüklemede chatleri getir ve mesaj limiti göster
+  loadChats();
+  updateMessageLimitDisplay();
+
+});
+</script>
+
+
+</body>
+</html>

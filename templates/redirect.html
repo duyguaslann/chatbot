@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yönlendirme Sayfası</title>
+
+  <style>
+    body {
+      background: linear-gradient(to right, #1d4ed8, #2563eb);
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    .container {
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      text-align: center;
+      width: 90%;
+      max-width: 400px;
+    }
+
+    h2 {
+      margin-bottom: 30px;
+      color: #1e3a8a;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.3s ease;
+    }
+
+    .chat {
+      background-color: #4f46e5;
+      color: white;
+    }
+
+    .chat:hover {
+      background-color: #4338ca;
+    }
+
+    .vector {
+      background-color: #10b981;
+      color: white;
+    }
+
+    .vector:hover {
+      background-color: #059669;
+    }
+
+    .fine {
+      background-color: #f59e0b;
+      color: white;
+    }
+
+    .fine:hover {
+      background-color: #d97706;
+    }
+  </style>
+</head>
+<body>
+
+<!-- redirect.html -->
+  <div class="container">
+    <h2>Ne yapmak istersin?</h2>
+    <button class="btn chat" onclick="window.location.href='/chatler'">Chatbot'a Git</button>
+    <button class="btn vector" onclick="window.location.href='/query'">📄 Veri Girişi (Vector DB)</button>
+    <button class="btn fine" onclick="window.location.href='/training'">🧠 Fine-Tuning Sayfası</button>
+
+  </div>
+
+</body>
+</html>

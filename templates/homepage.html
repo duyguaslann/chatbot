@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ChatBot'a Giriş</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      padding: 0;
+      margin: 0;
+    }
+
+    body {
+      height: 100vh;
+      background: linear-gradient(135deg, #003399, #1a73e8);
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+
+    .login-container {
+      background: white;
+      padding: 40px 30px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      text-align: center;
+    }
+
+    .login-container h1 {
+      margin-bottom: 10px;
+      color: #003399;
+      font-size: 28px;
+    }
+
+    .login-container p {
+      margin-bottom: 25px;
+      color: #555;
+      font-size: 15px;
+    }
+
+    .login-container input {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .login-container button {
+      width: 100%;
+      padding: 12px;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .login-container button:hover {
+      background-color: #0c59c4;
+    }
+
+    .login-container .slogan {
+      font-size: 14px;
+      color: #888;
+      margin-bottom: 20px;
+      font-style: italic;
+    }
+
+    .logo {
+      font-size: 40px;
+      color: #003399;
+      margin-bottom: 20px;
+    }
+
+    .redirect-wrapper {
+      margin-top: 30px;
+      text-align: center;
+    }
+
+    .redirect-wrapper button {
+      background-color: #10b981;
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    .redirect-wrapper button:hover {
+      background-color: #059669;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="logo">🤖</div>
+    <h1>ChatBot'a Hoş Geldin</h1>
+    <p class="slogan">Akıllı sohbet asistanına erişmek için giriş yap</p>
+
+    <!  Forma id eklendi -->
+    <form id="login-form" action="/login" method="POST">
+      <input type="email" name="email" placeholder="E-mail" required />
+      <input type="password" name="password" placeholder="Şifre" required />
+      <div class="redirect-wrapper">
+        <button type="submit">Giriş</button>
+      </div>
+
+    </form>
+  </div>
+
+
+<!--
+  <script>
+    document.getElementById("login-form").addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const formData = new FormData(this);
+      const email = formData.get("email");
+      const password = formData.get("password");
+
+      const response = await fetch("/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        window.location.href = "/chatler";
+      } else {
+        alert(data.error || "Giriş yapılamadı.");
+      }
+    });
+  </script>
+
+  -->
+</body>
+</html>

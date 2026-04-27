@@ -1,0 +1,24 @@
+[
+  {
+    "name": "save_note_to_desktop",
+    "description": "Kullanıcının verdiği notu masaüstüne bir metin dosyası olarak kaydeder.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "note_content": {
+          "type": "string",
+          "description": "Masaüstüne kaydedilecek notun içeriği."
+        }
+      },
+      "required": ["note_content"]
+    }
+  },
+  {
+    "name": "get_user_profile",
+    "description": "Mevcut kullanıcının profil bilgilerini (adı, soyadı, e-posta) döndürür.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]

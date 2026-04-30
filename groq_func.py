@@ -1,16 +1,14 @@
-from openai import OpenAI
+from groq import Groq
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
-API_KEY = os.getenv("GROQ_API_KEY")
-client = OpenAI(api_key=API_KEY, base_url="https://api.groq.com/openai/v1")
-print(os.getenv("GROQ_API_KEY"))
 
-def get_chat_response_groq(messages, model="llama3-70b-8192"):
+def get_chat_response_groq(messages, model="llama-3.1-8b-instant"):
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     response = client.chat.completions.create(
         model=model,
-        messages=messages
-        # Groq function_call yok
+        messages=messages,
+        max_tokens=1000
     )
     return response.choices[0].message

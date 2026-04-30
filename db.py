@@ -2,10 +2,12 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import RealDictCursor
 import os
+import bcrypt
 
 load_dotenv()
 conn = psycopg2.connect(
-    host=os.getenv("DB_HOST"),
+    host=os.getenv("POSTGRES_HOST", os.getenv("DB_HOST", "localhost")),
+    port=int(os.getenv("POSTGRES_PORT", "5432")),
     database=os.getenv("DB_NAME"),
     user=os.getenv("DB_USER"),
     password=os.getenv("DB_PASS")
@@ -74,6 +76,17 @@ def save_message(user_type, message_text, chat_id, status=1):
             (user_type, message_text, chat_id, status)
         )
         conn.commit()
+
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+# Migration SQL (mevcut düz metin şifreleri hash'e çevirmek için):
+# UPDATE users SET password = crypt(password, gen_salt('bf')) WHERE password NOT LIKE '$2b$%';
+# Ya da uygulama tarafında: yeni kayıtlarda hash_password() kullan,
+# eski kayıtlar için kullanıcı ilk girişte şifresini sıfırlamalı.
 
 def get_user_by_email(email):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:

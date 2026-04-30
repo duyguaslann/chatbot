@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.idea/
+chroma_data/
+chroma_data_backup/
+chroma_db/
+*.jsonl

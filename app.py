@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from db import (
     create_chat, get_chats, save_message, get_messages_by_chat, update_chat_title, clear_chat_history,
-    get_user_fullname, get_user_profile, get_user_by_email, conn, get_last_messages
+    get_user_fullname, get_user_profile, get_user_by_email, verify_password, conn, get_last_messages
 )
 from datetime import datetime
 import json
@@ -11,6 +11,7 @@ from common_file import is_time_query, is_currency_query, foreign_currency
 from pathlib import Path
 from openai_func import get_chat_response_openai, openai_func
 from groq_func import get_chat_response_groq
+from ollama_func import get_chat_response_ollama
 from db import get_today_message_count
 from openai import OpenAI
 from fine_tuning import load_jsonl_to_db, upload_file
@@ -22,27 +23,35 @@ import pandas as pd
 load_dotenv()
 
 print("FINE_TUNED_MODEL:", os.getenv("FINE_TUNED_MODEL"))
-USE_PROVIDER = os.getenv("USE_PROVIDER", "openai").lower()
+USE_PROVIDER = os.getenv("USE_PROVIDER", "groq").lower()
 
 if USE_PROVIDER == "openai":
     LLM_MODEL = "gpt-4o"
 elif USE_PROVIDER == "groq":
     LLM_MODEL = "llama-3.1-8b-instant"
+elif USE_PROVIDER == "ollama":
+    LLM_MODEL = "llama3.2"
 else:
-    raise ValueError("USE_PROVIDER değeri 'groq' ya da 'openai' olmalı.")
+    raise ValueError("USE_PROVIDER değeri 'openai', 'groq' ya da 'ollama' olmalı.")
 
 # Model ve ChromaDB ayarları
-# Daha küçük model kullan (bellek sorunu için)
 model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
-client = chromadb.PersistentClient(path="./chroma_data")
-collection = client.get_or_create_collection(name="company_data")
+CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
+CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", "8000"))
+chroma_client = chromadb.HttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
+collection = chroma_client.get_or_create_collection(name="company_data")
 
-SIMILARITY_SCORE = float(os.getenv("SIMILARITY_SCORE", 0.3))
+SIMILARITY_SCORE = float(os.getenv("SIMILARITY_THRESHOLD", "0.28"))
 MAX_CONTEXT = int(os.getenv("MAX_CONTEXT", 3))
 FINE_TUNED_MODEL = os.getenv("FINE_TUNED_MODEL", "gpt-3.5-turbo")
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "gizli-anahtar")  # session kullanabilmek için oluştur
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    app.logger.exception("Unhandled exception")
+    return jsonify({"error": str(e)}), 500
 
 if USE_PROVIDER == "openai":
     FINE_TUNED_MODEL = os.getenv("FINE_TUNED_MODEL", "gpt-3.5-turbo")
@@ -84,7 +93,7 @@ def login():
         return render_template("homepage.html", error="Email ve şifre gerekli")
 
     user = get_user_by_email(email)
-    if user and password == user["password"]:
+    if user and verify_password(password, user["password"]):
         # Başarılı girişte session'a kaydet
         session["user_id"] = user["id"]
         session["user_name"] = f"{user['first_name']} {user['last_name']}"
@@ -97,7 +106,7 @@ def login():
 def set_provider():
     data = request.get_json()
     provider = data.get('provider')
-    if provider in ['openai', 'groq']:
+    if provider in ['openai', 'groq', 'ollama']:
         session['provider'] = provider
         return jsonify({"status": "success"})
     else:
@@ -161,96 +170,104 @@ def get_message_limit():
 #Chat mesaj gönder ve sil
 @app.route("/chat/<int:chat_id>", methods=["POST", "DELETE"])
 def chat_message(chat_id):
-    if request.method == "DELETE":
-        from db import delete_chat
-        try:
+    try:
+        if request.method == "DELETE":
+            from db import delete_chat
             delete_chat(chat_id)
             return jsonify({"message": "Chat silindi"})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
 
-    # POST method
-    data = request.get_json()
-    user_msg = data.get("message")
+        # POST method
+        data = request.get_json()
+        if data is None:
+            return jsonify({"detail": "Geçersiz JSON verisi"}), 400
 
-    if not user_msg:
-        return jsonify({"detail": "Mesaj gereklidir"}), 400
+        user_msg = data.get("message")
+        if not user_msg:
+            return jsonify({"detail": "Mesaj gereklidir"}), 400
 
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"detail": "Kullanıcı girişi gerekli."}), 401
 
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"detail": "Kullanıcı girişi gerekli."}), 401
+        # Günlük mesaj limiti kontrolü
+        DAILY_LIMIT = int(os.getenv("DAILY_MESSAGE_LIMIT", 20))
+        current_count = get_today_message_count(user_id)
+        if current_count >= DAILY_LIMIT:
+            return jsonify({"reply": "Bugünlük mesaj limitinize ulaştınız. Lütfen yarın tekrar deneyin."}), 200
 
-    # Günlük mesaj limiti kontrolü
-    DAILY_LIMIT = int(os.getenv("DAILY_MESSAGE_LIMIT", 20))
-    current_count = get_today_message_count(user_id)
-    if current_count >= DAILY_LIMIT:
-        return jsonify({"reply": "Bugünlük mesaj limitinize ulaştınız. Lütfen yarın tekrar deneyin."}), 200
+        user_msg_lower = user_msg.lower()
 
-    user_msg_lower = user_msg.lower()
-
-    # Saat ve tarih sorgusu
-    if is_time_query(user_msg_lower):
-        now = datetime.now()
-        tarih_str = now.strftime("Tarih %d %B %Y %A. Saat %H:%M")
-        save_message(1, user_msg, chat_id, status=1)
-        save_message(0, tarih_str, chat_id, status=1)
-        return jsonify({"reply": tarih_str})
-
-    # Döviz sorgusu
-    if is_currency_query(user_msg_lower):
-        reply = foreign_currency(user_msg_lower)
-        save_message(1, user_msg, chat_id, status=1)
-        save_message(0, reply, chat_id, status=1)
-        return jsonify({"reply": reply})
-
-    # Benzer contextleri ara
-    similar_contexts = search_similar_contexts(user_msg)
-    context_text = "\n\n".join(similar_contexts)
-
-    # json file (openai)
-    functions_path = Path(__file__).parent / "func.json"
-    with open(functions_path, "r", encoding="utf-8") as f:
-        functions = json.load(f)
-
-    functions_to_pass = None
-
-
-    # Eğer context varsa, prompt'a ekle
-    if context_text:
-        full_prompt = f"{user_msg}\n\nBu bilgilere göre cevap ver:\n{context_text}"
-    else:
-        full_prompt = user_msg
-
-    system_message = (
-        "Sen CMA Danışmanlık hakkında bilgi veren yardımcı asistansın. Sorulara net ve doğru cevaplar ver."
-        " Kullanıcı not tutmak isterse, 'save_note_to_desktop' fonksiyonunu çağır."
-        " Kullanıcı ben kimim derse, 'get_user_profile' fonksiyonunu çağır."
-    )
-
-    # OpenAI API'ye çağrı yap
-    messages_to_send = [
-        {"role": "system", "content": system_message},
-        {"role": "user", "content": full_prompt}
-    ]
-
-    provider = session.get('provider', USE_PROVIDER)  # session’daki varsa al, yoksa env’den
-
-    if provider == 'openai':
-        response = openai_func(messages_to_send, user_msg, chat_id, session["user_id"], model=FINE_TUNED_MODEL, functions_to_pass=functions)
-        print("Kullanılan model:", FINE_TUNED_MODEL)
-        if response:
-            return response
-
-    elif provider == 'groq':
-        LLM_MODEL = "llama-3.1-8b-instant"
-        message = get_chat_response_groq(messages_to_send, model=LLM_MODEL)
-        if message:
+        # Saat ve tarih sorgusu
+        if is_time_query(user_msg_lower):
+            now = datetime.now()
+            tarih_str = now.strftime("Tarih %d %B %Y %A. Saat %H:%M")
             save_message(1, user_msg, chat_id, status=1)
-            save_message(0, message.content, chat_id, status=1)
-            return jsonify({"reply": message.content})
-    else:
-        return jsonify({"error": "Geçersiz provider seçimi"}), 400
+            save_message(0, tarih_str, chat_id, status=1)
+            return jsonify({"reply": tarih_str})
+
+        # Döviz sorgusu
+        if is_currency_query(user_msg_lower):
+            reply = foreign_currency(user_msg_lower)
+            save_message(1, user_msg, chat_id, status=1)
+            save_message(0, reply, chat_id, status=1)
+            return jsonify({"reply": reply})
+
+        # Benzer contextleri ara
+        similar_contexts = search_similar_contexts(user_msg)
+        context_text = "\n\n".join(similar_contexts)
+
+        # json file (openai)
+        functions_path = Path(__file__).parent / "func.json"
+        with open(functions_path, "r", encoding="utf-8") as f:
+            functions = json.load(f)
+
+        # Eğer context varsa, prompt'a ekle
+        if context_text:
+            full_prompt = f"{user_msg}\n\nBu bilgilere göre cevap ver:\n{context_text}"
+        else:
+            full_prompt = user_msg
+
+        system_message = (
+            "Sen CMA Danışmanlık hakkında bilgi veren yardımcı asistansın. Sorulara net ve doğru cevaplar ver."
+            " Kullanıcı not tutmak isterse, 'save_note_to_desktop' fonksiyonunu çağır."
+            " Kullanıcı ben kimim derse, 'get_user_profile' fonksiyonunu çağır."
+        )
+
+        # OpenAI API'ye çağrı yap
+        messages_to_send = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": full_prompt}
+        ]
+
+        provider = session.get('provider', USE_PROVIDER)
+
+        if provider == 'openai':
+            response = openai_func(messages_to_send, user_msg, chat_id, session["user_id"], model=FINE_TUNED_MODEL, functions_to_pass=functions)
+            print("Kullanılan model:", FINE_TUNED_MODEL)
+            if response:
+                return response
+
+        elif provider == 'groq':
+            LLM_MODEL = "llama-3.1-8b-instant"
+            message = get_chat_response_groq(messages_to_send, model=LLM_MODEL)
+            if message:
+                save_message(1, user_msg, chat_id, status=1)
+                save_message(0, message.content, chat_id, status=1)
+                return jsonify({"reply": message.content})
+
+        elif provider == 'ollama':
+            LLM_MODEL = "llama3.2"
+            message = get_chat_response_ollama(messages_to_send, model=LLM_MODEL)
+            if message:
+                save_message(1, user_msg, chat_id, status=1)
+                save_message(0, message.content, chat_id, status=1)
+                return jsonify({"reply": message.content})
+        else:
+            return jsonify({"error": "Geçersiz provider seçimi"}), 400
+
+    except Exception as e:
+        app.logger.exception("Chat mesajı gönderilirken hata oluştu")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/chat/<int:chat_id>/title", methods=["PUT"])
 def update_chat_title_api(chat_id):
@@ -549,14 +566,6 @@ if __name__ == "__main__":
 
 
 
-@app.route("/add-data", methods=["POST"])
-def add_data():
-    data = request.get_json()
-    sentences = [s.strip() for s in data.get("text","").split(".") if s.strip()]
-    embeddings = model.encode(sentences).tolist()
-    ids = [f"id_{uuid.uuid4()}" for _ in sentences]
-    collection.add(documents=sentences, embeddings=embeddings, ids=ids)
-    return {"message": "Veriler başarıyla eklendi!"}
 
 
 

@@ -109,12 +109,12 @@ input:checked + .slider:before {
 
 <div class="chat-container">
   <div class="chat-header">Chatbot
-      <label class="switch" style="margin-left: 20px; vertical-align: middle;">
-    <input type="checkbox" id="providerToggle" checked />
-    <span class="slider"></span>
-  </label>
-  <span id="providerLabel" style="font-weight: bold; margin-left: 8px; vertical-align: middle;">OpenAI</span>
-</div>
+      <div class="provider-selector" style="margin-left: 20px; display: inline-block;">
+        <label><input type="radio" name="provider" value="groq" checked /> Groq</label>
+        <label style="margin-left: 10px;"><input type="radio" name="provider" value="openai" /> OpenAI</label>
+        <label style="margin-left: 10px;"><input type="radio" name="provider" value="ollama" /> Ollama</label>
+      </div>
+  </div>
 
   <div class="chat-box" id="chat-box"></div>
 <div class="message-search-container">
@@ -628,26 +628,23 @@ chatFilterInput.addEventListener('keydown', (e) => {
 
 
 
-  // Sağ üstte provider toggle ve backend'e gönder
-  toggle.checked = true;
-  label.textContent = "OpenAI";
+  // Sağ üstte provider radio button'ları
+  const providerRadios = document.querySelectorAll('input[name="provider"]');
 
-  toggle.addEventListener('change', () => {
-    if (toggle.checked) {
-      label.textContent = "OpenAI";
-    } else {
-      label.textContent = "Groq";
-    }
+  providerRadios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      const selectedProvider = radio.value;
 
-    fetch('/set-provider', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: toggle.checked ? 'openai' : 'groq' })
-    }).then(res => {
-      if (!res.ok) alert("Provider seçimi backend'e gönderilemedi!");
-    }).catch(() => alert("Provider seçimi backend'e gönderilemedi!"));
+      fetch('/set-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: selectedProvider })
+      }).then(res => {
+        if (!res.ok) alert("Provider seçimi backend'e gönderilemedi!");
+      }).catch(() => alert("Provider seçimi backend'e gönderilemedi!"));
 
-    console.log("Seçilen provider:", toggle.checked ? "OpenAI" : "Groq");
+      console.log("Seçilen provider:", selectedProvider);
+    });
   });
 
   // Input içinde komut algıla ve renklendir

@@ -1,0 +1,36 @@
+FROM python:3.11-slim
+
+# GPU destegi icin CUDA olan makinede: docker build --build-arg BASE=nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+# Varsayilan: CPU
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only torch (GPU icin bu satiri kaldir ve asagidaki CUDA satiri ac)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# GPU (CUDA 12.1) icin:
+# RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu121
+
+RUN pip install --no-cache-dir \
+    transformers>=4.40.0 \
+    peft>=0.10.0 \
+    bitsandbytes>=0.43.0 \
+    datasets>=2.19.0 \
+    evaluate>=0.4.0 \
+    accelerate>=0.29.0 \
+    mlflow>=2.22.0 \
+    psycopg2-binary>=2.9.0 \
+    python-dotenv>=1.0.0 \
+    sentencepiece \
+    protobuf
+
+COPY data_export.py .
+COPY local_finetune.py .
+COPY .env .
+
+CMD ["python", "local_finetune.py"]

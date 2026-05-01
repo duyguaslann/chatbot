@@ -7,13 +7,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-# Install CPU-only torch first so sentence-transformers won't trigger CUDA variant (~1.5 GB)
+# Katman 1: Ağır paketler (torch, sentence-transformers) — requirements.base.txt değişmediğinde cache'den gelir
+COPY requirements.base.txt .
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.base.txt
 
-# sentence-transformers modelini build sırasında indir (runtime'da HuggingFace erişimi gerekmez)
+# sentence-transformers modelini build sırasında indir
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-MiniLM-L6-v2')"
+
+# Katman 2: Uygulama bağımlılıkları — sadece bunlar değişince hızlı rebuild
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

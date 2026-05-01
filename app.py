@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from common_file import is_time_query, is_currency_query, foreign_currency
 from pathlib import Path
-from openai_func import get_chat_response_openai, openai_func
+from openai_func import get_chat_response_openai, openai_func, vision_chat, pdf_to_images
 from groq_func import get_chat_response_groq
 from ollama_func import get_chat_response_ollama
 from db import get_today_message_count
@@ -555,6 +555,56 @@ def upload_excel():
     except Exception as e:
        return jsonify({"error": str(e)}), 500
 
+
+
+ALLOWED_VISION_EXTENSIONS = {"jpg", "jpeg", "png", "pdf"}
+
+@app.route("/api/vision", methods=["POST"])
+def vision_endpoint():
+    file = request.files.get("file")
+    question = request.form.get("question", "Bu görseli açıkla.")
+
+    if not file:
+        return jsonify({"error": "Dosya gönderilmedi."}), 400
+
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_VISION_EXTENSIONS:
+        return jsonify({"error": f"Desteklenmeyen dosya tipi: {ext}. İzin verilenler: {', '.join(ALLOWED_VISION_EXTENSIONS)}"}), 400
+
+    rag_context = ""
+    try:
+        query_embedding = model.encode([question]).tolist()
+        rag_results = collection.query(query_embeddings=query_embedding, n_results=3)
+        if rag_results["documents"] and rag_results["documents"][0]:
+            rag_context = "\n".join(rag_results["documents"][0])
+    except Exception:
+        pass
+
+    try:
+        if ext == "pdf":
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                file.save(tmp.name)
+                tmp_path = tmp.name
+            try:
+                pages = pdf_to_images(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+
+            answers = []
+            for i, page_b64 in enumerate(pages):
+                answer = vision_chat(page_b64, question, rag_context)
+                answers.append({"page": i + 1, "answer": answer})
+            return jsonify({"results": answers})
+
+        else:
+            import base64
+            image_b64 = base64.b64encode(file.read()).decode("utf-8")
+            answer = vision_chat(image_b64, question, rag_context)
+            return jsonify({"answer": answer})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

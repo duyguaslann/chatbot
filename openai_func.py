@@ -75,3 +75,51 @@ def openai_func(messages, user_msg, chat_id, USER_ID, model="gpt-4o", functions_
     save_message(1, user_msg, chat_id, status=1)
     save_message(0, reply, chat_id, status=1)
     return jsonify({"reply": reply})
+
+
+def vision_chat(image_base64: str, question: str, rag_context: str = "") -> str:
+    messages = []
+
+    if rag_context:
+        messages.append({
+            "role": "system",
+            "content": f"Aşağıdaki bağlamı kullanarak soruyu yanıtla:\n\n{rag_context}"
+        })
+
+    messages.append({
+        "role": "user",
+        "content": [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+            },
+            {"type": "text", "text": question},
+        ],
+    })
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        raise RuntimeError(f"Vision API hatası: {e}")
+
+
+def pdf_to_images(pdf_path: str) -> list[str]:
+    try:
+        import fitz
+    except ImportError:
+        raise ImportError("PyMuPDF kurulu değil. 'pip install pymupdf' çalıştırın.")
+
+    import base64
+
+    doc = fitz.open(pdf_path)
+    images = []
+    for page in doc:
+        pix = page.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("jpeg")
+        images.append(base64.b64encode(img_bytes).decode("utf-8"))
+    doc.close()
+    return images

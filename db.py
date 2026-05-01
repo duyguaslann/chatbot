@@ -113,7 +113,7 @@ def get_today_message_count(user_id):
 def get_messages_by_chat(chat_id):
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT user_type, message_text, created_at FROM messages WHERE chat_id = %s AND status = 1 ORDER BY created_at",
+            "SELECT user_type, message_text, created_at FROM messages WHERE chat_id = %s AND status = '1' ORDER BY created_at",
             (chat_id,)
         )
         rows = cur.fetchall()
@@ -126,7 +126,7 @@ def get_last_messages(chat_id, limit=10):
             """
             SELECT user_type, message_text, created_at
             FROM messages
-            WHERE chat_id = %s AND status = 1
+            WHERE chat_id = %s AND status = '1'
             ORDER BY created_at DESC
             LIMIT %s
             """,
@@ -139,7 +139,7 @@ def get_last_messages(chat_id, limit=10):
 
 def get_chats(user_id):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("SELECT * FROM chats WHERE status = 1 AND user_id = %s ORDER BY created_at DESC", (user_id,))
+        cur.execute("SELECT * FROM chats WHERE status = '1' AND user_id = %s ORDER BY created_at DESC", (user_id,))
         return cur.fetchall()
 
 

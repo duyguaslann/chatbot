@@ -1,73 +1,67 @@
-import json
-from sentence_transformers import SentenceTransformer
+"""
+LangChain + ChromaDB entegrasyonu.
+Vectorstore, retriever ve dokuman ekleme islemleri burada.
+"""
+import os
 import chromadb
+from dotenv import load_dotenv
+from langchain_chroma import Chroma
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
-CHROMA_DB_PATH = "./chroma_data"
+load_dotenv()
+
+CHROMADB_HOST   = os.getenv("CHROMADB_HOST", "localhost")
+CHROMADB_PORT   = int(os.getenv("CHROMADB_PORT", "8000"))
 COLLECTION_NAME = "company_data"
-JSONL_FILE_PATH = "fine_tune_data_unique.jsonl"
-EMBEDDING_MODEL_NAME = "intfloat/multilingual-e5-large"
-BATCH_SIZE = 32  # Embedding ve ekleme için toplu işlem boyutu
+EMBEDDING_MODEL = "paraphrase-MiniLM-L6-v2"
 
-print(f" Embedding modeli yükleniyor: {EMBEDDING_MODEL_NAME}...")
-model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-print("Model başarıyla yüklendi.")
+_embeddings  = None
+_vectorstore = None
 
-print(f" ChromaDB başlatılıyor ve '{COLLECTION_NAME}' koleksiyonu yönetiliyor...")
-client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
-try:
-    client.delete_collection(name=COLLECTION_NAME)
-    print(f"Mevcut '{COLLECTION_NAME}' koleksiyonu silindi.")
-except chromadb.errors.NotFoundError:
-    print(f"'{COLLECTION_NAME}' koleksiyonu bulunamadı, yeni oluşturulacak.")
-
-collection = client.create_collection(name=COLLECTION_NAME)
-print(f" Yeni veya sıfırlanmış '{COLLECTION_NAME}' koleksiyonu '{CHROMA_DB_PATH}' konumunda oluşturuldu.")
-
-# JSONL dosyasını oku ve verileri hazırla
-print(f" '{JSONL_FILE_PATH}' dosyasından veriler okunuyor...")
-veriler = []
-with open(JSONL_FILE_PATH, "r", encoding="utf-8") as f:
-    for satir in f:
-        data = json.loads(satir)
-        # OpenAI sohbet formatına uygun messages listesinden assistant cevaplarını al
-        for mesaj in data.get("messages", []):
-            if mesaj.get("role") == "assistant":
-                cevap = mesaj.get("content", "").strip()
-                if cevap:  # Boş olmayan cevapları al
-                    veriler.append(cevap)
-print(f" {len(veriler)} adet veri başarıyla okundu.")
-
-#  Her metni embed et ve Chroma'ya ekle
-if not veriler:
-    print(" Gömülecek veri bulunamadı. Lütfen JSONL dosyanızı kontrol edin.")
-else:
-    print(f" {len(veriler)} veri bulundu. Embedding ve kaydetme başlıyor (toplu işlem boyutu: {BATCH_SIZE})...")
-
-    documents_to_add = []
-    embeddings_to_add = []
-    ids_to_add = []
-
-    for i in range(0, len(veriler), BATCH_SIZE):
-        batch_metinler = veriler[i: i + BATCH_SIZE]
-        batch_ids = [f"doc_{j}" for j in range(i, i + len(batch_metinler))]
-
-        batch_embeddings = model.encode(batch_metinler).tolist()
-
-        documents_to_add.extend(batch_metinler)
-        embeddings_to_add.extend(batch_embeddings)
-        ids_to_add.extend(batch_ids)
-
-        print(f" {i + len(batch_metinler)} / {len(veriler)} metin embedding'leri oluşturuldu.")
-
-    if documents_to_add:
-        collection.add(
-            documents=documents_to_add,
-            embeddings=embeddings_to_add,
-            ids=ids_to_add
+def get_embeddings() -> HuggingFaceEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        _embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={"device": "cpu"},
         )
-        print(f"Tüm {len(documents_to_add)} embedding ChromaDB'ye başarıyla eklendi.")
-    else:
-        print("Eklenecek doküman bulunamadı.")
+    return _embeddings
 
-print(" Embedding ve veri kaydı tamamlandı. Artık 'query_embeddings.py' dosyasını çalıştırabilirsiniz.")
+
+def get_vectorstore() -> Chroma:
+    global _vectorstore
+    if _vectorstore is None:
+        client = chromadb.HttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
+        _vectorstore = Chroma(
+            client=client,
+            collection_name=COLLECTION_NAME,
+            embedding_function=get_embeddings(),
+        )
+    return _vectorstore
+
+
+def get_retriever(k: int = 3):
+    return get_vectorstore().as_retriever(search_kwargs={"k": k})
+
+
+def add_texts(texts: list) -> int:
+    get_vectorstore().add_texts(texts)
+    return len(texts)
+
+
+def get_all_documents() -> list:
+    results = get_vectorstore()._collection.get()
+    return [
+        {"id": doc_id, "text": doc}
+        for doc_id, doc in zip(results["ids"], results["documents"])
+    ]
+
+
+def delete_documents(ids: list) -> None:
+    get_vectorstore().delete(ids=ids)
+
+
+def update_document(doc_id: str, new_text: str) -> None:
+    get_vectorstore().delete(ids=[doc_id])
+    get_vectorstore().add_texts([new_text], ids=[doc_id])

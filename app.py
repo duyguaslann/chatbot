@@ -8,17 +8,18 @@ from db import (
 from datetime import datetime
 import json
 from common_file import is_time_query, is_currency_query, foreign_currency
-from pathlib import Path
-from openai_func import get_chat_response_openai, openai_func, vision_chat, pdf_to_images
-from groq_func import get_chat_response_groq
-from ollama_func import get_chat_response_ollama
+from openai_func import vision_chat, pdf_to_images
 from db import get_today_message_count
 from openai import OpenAI
 from fine_tuning import load_jsonl_to_db, upload_file
-from sentence_transformers import SentenceTransformer
-import chromadb
-import uuid
 import pandas as pd
+from langchain.chains import ConversationalRetrievalChain
+from langchain.prompts import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
+from create_embeddings import get_retriever, add_texts, get_all_documents, delete_documents, update_document
 
 load_dotenv()
 
@@ -34,15 +35,7 @@ elif USE_PROVIDER == "ollama":
 else:
     raise ValueError("USE_PROVIDER değeri 'openai', 'groq' ya da 'ollama' olmalı.")
 
-# Model ve ChromaDB ayarları
-model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
-CHROMADB_HOST = os.getenv("CHROMADB_HOST", "localhost")
-CHROMADB_PORT = int(os.getenv("CHROMADB_PORT", "8000"))
-chroma_client = chromadb.HttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
-collection = chroma_client.get_or_create_collection(name="company_data")
-
-SIMILARITY_SCORE = float(os.getenv("SIMILARITY_THRESHOLD", "0.28"))
-MAX_CONTEXT = int(os.getenv("MAX_CONTEXT", 3))
+MAX_CONTEXT      = int(os.getenv("MAX_CONTEXT", 3))
 FINE_TUNED_MODEL = os.getenv("FINE_TUNED_MODEL", "gpt-3.5-turbo")
 
 app = Flask(__name__)
@@ -61,23 +54,39 @@ elif USE_PROVIDER == "groq":
 else:
     raise ValueError("USE_PROVIDER değeri 'groq' ya da 'openai' olmalı.")
 
-# Benzer içerik arama
-def search_similar_contexts(user_prompt):
-    embedding = model.encode([user_prompt])[0]  #Kullanıcının mesajını embedding'e çeviriyor
-    results = collection.query(query_embeddings=[embedding], n_results=MAX_CONTEXT)  #benzer MAX_CONTEXT kadar dökümanı çekiyor
-    documents = results.get("documents", [[]])[0]
-    distances = results.get("distances", [[]])[0]
+def build_llm(provider: str):
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=FINE_TUNED_MODEL,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            temperature=0,
+        )
+    elif provider == "groq":
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model="llama-3.1-8b-instant",
+            api_key=os.getenv("GROQ_API_KEY"),
+            temperature=0,
+        )
+    else:
+        from langchain_community.chat_models import ChatOllama
+        return ChatOllama(
+            model="llama3.2",
+            base_url=f"http://{os.getenv('OLLAMA_HOST','localhost')}:{os.getenv('OLLAMA_PORT','11434')}",
+        )
 
-    # Benzerlik eşiğine göre filtrele
-    filtered = [(doc, dist) for doc, dist in zip(documents, distances) if dist <= SIMILARITY_SCORE]
 
-    # Terminalde benzerlik skorlarını yazdır
-    print("Benzerlik skorları ve dokümanlar:")
-    for doc, dist in zip(documents, distances):
-        print(f"Score: {dist:.4f} - Doc: {doc[:80]}...")
+SYSTEM_TEMPLATE = (
+    "Sen CMA Danışmanlık hakkında bilgi veren yardımcı asistansın. Sorulara net ve doğru cevaplar ver.\n"
+    "Kullanıcı not tutmak isterse masaüstüne kaydet. Kullanıcı 'ben kimim' derse profil bilgisini ver.\n\n"
+    "Bağlam:\n{context}"
+)
 
-    context_texts = [doc for doc, dist in filtered]
-    return context_texts
+_qa_prompt = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(SYSTEM_TEMPLATE),
+    HumanMessagePromptTemplate.from_template("{question}"),
+])
 
 
 @app.route('/')
@@ -212,58 +221,36 @@ def chat_message(chat_id):
             save_message(0, reply, chat_id, status=1)
             return jsonify({"reply": reply})
 
-        # Benzer contextleri ara
-        similar_contexts = search_similar_contexts(user_msg)
-        context_text = "\n\n".join(similar_contexts)
-
-        # json file (openai)
-        functions_path = Path(__file__).parent / "func.json"
-        with open(functions_path, "r", encoding="utf-8") as f:
-            functions = json.load(f)
-
-        # Eğer context varsa, prompt'a ekle
-        if context_text:
-            full_prompt = f"{user_msg}\n\nBu bilgilere göre cevap ver:\n{context_text}"
-        else:
-            full_prompt = user_msg
-
-        system_message = (
-            "Sen CMA Danışmanlık hakkında bilgi veren yardımcı asistansın. Sorulara net ve doğru cevaplar ver."
-            " Kullanıcı not tutmak isterse, 'save_note_to_desktop' fonksiyonunu çağır."
-            " Kullanıcı ben kimim derse, 'get_user_profile' fonksiyonunu çağır."
-        )
-
-        # OpenAI API'ye çağrı yap
-        messages_to_send = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": full_prompt}
-        ]
-
         provider = session.get('provider', USE_PROVIDER)
 
-        if provider == 'openai':
-            response = openai_func(messages_to_send, user_msg, chat_id, session["user_id"], model=FINE_TUNED_MODEL, functions_to_pass=functions)
-            print("Kullanılan model:", FINE_TUNED_MODEL)
-            if response:
-                return response
+        # Konuşma geçmişini çek ve (human, ai) çiftlerine dönüştür
+        history_rows = get_last_messages(chat_id, limit=10)
+        chat_history = []
+        i = 0
+        while i < len(history_rows) - 1:
+            if history_rows[i]['user_type'] == 1 and history_rows[i + 1]['user_type'] == 0:
+                chat_history.append((
+                    history_rows[i]['message_text'],
+                    history_rows[i + 1]['message_text'],
+                ))
+                i += 2
+            else:
+                i += 1
 
-        elif provider == 'groq':
-            LLM_MODEL = "llama-3.1-8b-instant"
-            message = get_chat_response_groq(messages_to_send, model=LLM_MODEL)
-            if message:
-                save_message(1, user_msg, chat_id, status=1)
-                save_message(0, message.content, chat_id, status=1)
-                return jsonify({"reply": message.content})
+        chain = ConversationalRetrievalChain.from_llm(
+            llm=build_llm(provider),
+            retriever=get_retriever(k=MAX_CONTEXT),
+            combine_docs_chain_kwargs={"prompt": _qa_prompt},
+            return_source_documents=False,
+            verbose=False,
+        )
 
-        elif provider == 'ollama':
-            LLM_MODEL = "llama3.2"
-            message = get_chat_response_ollama(messages_to_send, model=LLM_MODEL)
-            if message:
-                save_message(1, user_msg, chat_id, status=1)
-                save_message(0, message.content, chat_id, status=1)
-                return jsonify({"reply": message.content})
-        else:
-            return jsonify({"error": "Geçersiz provider seçimi"}), 400
+        result = chain.invoke({"question": user_msg, "chat_history": chat_history})
+        reply  = result["answer"]
+
+        save_message(1, user_msg, chat_id, status=1)
+        save_message(0, reply, chat_id, status=1)
+        return jsonify({"reply": reply})
 
     except Exception as e:
         app.logger.exception("Chat mesajı gönderilirken hata oluştu")
@@ -476,20 +463,12 @@ def add_data():
         return {"error": "Boş metin gönderilemez."}, 400
 
     sentences = [s.strip() for s in raw_text.split(".") if s.strip()]
-    embeddings = model.encode(sentences).tolist()
-    ids = [f"id_{uuid.uuid4()}" for _ in sentences]
-
-    collection.add(documents=sentences, embeddings=embeddings, ids=ids)
+    add_texts(sentences)
     return {"message": "Veriler başarıyla eklendi!"}
 
 @app.route("/veriler", methods=["GET"])
 def verileri_getir():
-    results = collection.get()  # ChromaDB'den veri al
-    data = [
-        {"id": id_, "text": doc}
-        for id_, doc in zip(results["ids"], results["documents"])
-    ]
-    return jsonify(data)
+    return jsonify(get_all_documents())
 
 @app.route("/delete-data", methods=["POST"])
 def delete_data():
@@ -499,7 +478,7 @@ def delete_data():
     if not ids:
         return {"error": "Silinecek veri seçilmedi."}, 400
 
-    collection.delete(ids=ids)
+    delete_documents(ids)
     return {"message": "Seçilen veriler silindi."}
 
 @app.route("/update-data", methods=["POST"])
@@ -511,12 +490,7 @@ def update_data():
     if not doc_id or not new_text:
         return {"error": "ID ve yeni metin zorunludur."}, 400
 
-    # Önce sil, güncellenmiş veriyi tekrar ekle
-    collection.delete(ids=[doc_id])
-
-    new_embedding = model.encode([new_text]).tolist()
-    collection.add(documents=[new_text], embeddings=new_embedding, ids=[doc_id])
-
+    update_document(doc_id, new_text)
     return {"message": "Veri güncellendi."}
 
 
@@ -573,10 +547,8 @@ def vision_endpoint():
 
     rag_context = ""
     try:
-        query_embedding = model.encode([question]).tolist()
-        rag_results = collection.query(query_embeddings=query_embedding, n_results=3)
-        if rag_results["documents"] and rag_results["documents"][0]:
-            rag_context = "\n".join(rag_results["documents"][0])
+        docs = get_retriever(k=3).invoke(question)
+        rag_context = "\n".join(d.page_content for d in docs)
     except Exception:
         pass
 

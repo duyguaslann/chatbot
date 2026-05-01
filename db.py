@@ -15,153 +15,208 @@ conn = psycopg2.connect(
 
 conn.set_client_encoding('UTF8')
 
-#user üreten fonks
+
 def generate_next_user_id():
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT user_id FROM chats
-            WHERE user_id ~ '^user\\d+$'
-            ORDER BY LENGTH(user_id) DESC, user_id DESC
-            LIMIT 1;
-        """)
-        result = cur.fetchone()
-
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT user_id FROM chats
+                WHERE user_id ~ '^user\\d+$'
+                ORDER BY LENGTH(user_id) DESC, user_id DESC
+                LIMIT 1;
+            """)
+            result = cur.fetchone()
         if result:
-            last_user_id = result[0]
-            last_number = int(last_user_id.replace("user", ""))
-            new_user_id = f"user{last_number + 1}"
-        else:
-            new_user_id = "user1"
-
-        return new_user_id
+            last_number = int(result[0].replace("user", ""))
+            return f"user{last_number + 1}"
+        return "user1"
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_user_fullname(user_id):
-    with conn.cursor() as cur:
-        cur.execute("SELECT first_name, last_name FROM users WHERE id = %s", (user_id,))
-        result = cur.fetchone()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT first_name, last_name FROM users WHERE id = %s", (user_id,))
+            result = cur.fetchone()
         if result:
             return f"{result[0]} {result[1]}"
         return None
+    except Exception:
+        conn.rollback()
+        raise
 
-#calling
+
 def get_user_profile(user_id):
-    with conn.cursor() as cur:
-        cur.execute("SELECT first_name, last_name, age FROM users WHERE id = %s", (user_id,))
-        result = cur.fetchone()
-    if not result:
-        return "Kullanıcı bilgileri bulunamadı."
-    firstname, lastname, age = result
-    return f"Adın: {firstname} Soyadın: {lastname}, {age} yaşındasın."
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT first_name, last_name, age FROM users WHERE id = %s", (user_id,))
+            result = cur.fetchone()
+        if not result:
+            return "Kullanıcı bilgileri bulunamadı."
+        firstname, lastname, age = result
+        return f"Adın: {firstname} Soyadın: {lastname}, {age} yaşındasın."
+    except Exception:
+        conn.rollback()
+        raise
+
 
 def create_chat(user_id, title="Yeni Sohbet"):
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(
-            "INSERT INTO chats (user_id, title) VALUES (%s, %s) RETURNING *",
-            (user_id, title)
-        )
-        chat = cur.fetchone()
-        conn.commit()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "INSERT INTO chats (user_id, title) VALUES (%s, %s) RETURNING *",
+                (user_id, title)
+            )
+            chat = cur.fetchone()
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
     fullname = get_user_fullname(user_id)
-    welcome_msg = f"Hello Duygu Aslan, what would you like to learn?" if fullname else "Merhaba, ne öğrenmek istiyorsun?"
-
+    welcome_msg = (
+        f"Hello {fullname}, what would you like to learn?"
+        if fullname else "Merhaba, ne öğrenmek istiyorsun?"
+    )
     save_message(user_type=0, message_text=welcome_msg, chat_id=chat["id"], status=1)
     return chat
 
+
 def save_message(user_type, message_text, chat_id, status=1):
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO messages (user_type, message_text, chat_id, status) VALUES (%s, %s, %s, %s)",
-            (user_type, message_text, chat_id, status)
-        )
-        conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO messages (user_type, message_text, chat_id, status) VALUES (%s, %s, %s, %s)",
+                (user_type, message_text, chat_id, status)
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
 
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
+
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
-# Migration SQL (mevcut düz metin şifreleri hash'e çevirmek için):
-# UPDATE users SET password = crypt(password, gen_salt('bf')) WHERE password NOT LIKE '$2b$%';
-# Ya da uygulama tarafında: yeni kayıtlarda hash_password() kullan,
-# eski kayıtlar için kullanıcı ilk girişte şifresini sıfırlamalı.
 
 def get_user_by_email(email):
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("SELECT id, first_name, last_name, email, password FROM users WHERE email = %s", (email,))
-        return cur.fetchone()
-
-#daily messages limit
-def get_today_message_count(user_id):
-    with conn.cursor() as cursor:
-        query = """
-            SELECT COUNT(*) FROM messages
-            WHERE user_type = 1
-            AND DATE(created_at) = CURRENT_DATE
-            AND chat_id IN (
-                SELECT id FROM chats WHERE user_id = %s
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, first_name, last_name, email, password FROM users WHERE email = %s",
+                (email,)
             )
-        """
-        cursor.execute(query, (user_id,))
-        count = cursor.fetchone()[0]
-        return count
+            return cur.fetchone()
+    except Exception:
+        conn.rollback()
+        raise
 
 
-#mesajları getir
+def get_today_message_count(user_id):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM messages
+                WHERE user_type = 1
+                AND DATE(created_at) = CURRENT_DATE
+                AND chat_id IN (SELECT id FROM chats WHERE user_id = %s)
+                """,
+                (user_id,)
+            )
+            return cur.fetchone()[0]
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def get_messages_by_chat(chat_id):
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT user_type, message_text, created_at FROM messages WHERE chat_id = %s AND status = '1' ORDER BY created_at",
-            (chat_id,)
-        )
-        rows = cur.fetchall()
-        return [{"user_type": row[0], "message_text": row[1], "created_at": row[2].isoformat()} for row in rows]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_type, message_text, created_at FROM messages "
+                "WHERE chat_id = %s AND status = '1' ORDER BY created_at",
+                (chat_id,)
+            )
+            rows = cur.fetchall()
+        return [
+            {"user_type": r[0], "message_text": r[1], "created_at": r[2].isoformat()}
+            for r in rows
+        ]
+    except Exception:
+        conn.rollback()
+        raise
 
-#history limit
+
 def get_last_messages(chat_id, limit=10):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT user_type, message_text, created_at
-            FROM messages
-            WHERE chat_id = %s AND status = '1'
-            ORDER BY created_at DESC
-            LIMIT %s
-            """,
-            (chat_id, limit)
-        )
-        rows = cur.fetchall()
-        rows.reverse() #en eski tarih en başta
-        return [{"user_type": row[0], "message_text": row[1], "created_at": row[2].isoformat()} for row in rows]
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_type, message_text, created_at
+                FROM messages
+                WHERE chat_id = %s AND status = '1'
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (chat_id, limit)
+            )
+            rows = cur.fetchall()
+        rows.reverse()
+        return [
+            {"user_type": r[0], "message_text": r[1], "created_at": r[2].isoformat()}
+            for r in rows
+        ]
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_chats(user_id):
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("SELECT * FROM chats WHERE status = '1' AND user_id = %s ORDER BY created_at DESC", (user_id,))
-        return cur.fetchall()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM chats WHERE status = '1' AND user_id = %s ORDER BY created_at DESC",
+                (user_id,)
+            )
+            return cur.fetchall()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def update_chat_title(chat_id, new_title):
-    with conn.cursor() as cur:
-        cur.execute("UPDATE chats SET title = %s WHERE id = %s", (new_title, chat_id))
-        conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE chats SET title = %s WHERE id = %s", (new_title, chat_id))
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
-#status=0
+
 def delete_chat(chat_id):
-    with conn.cursor() as cur:
-        # Mesajları soft delete yap
-        cur.execute("UPDATE messages SET status = 0 WHERE chat_id = %s", (chat_id,))
-        # Chat’i soft delete yap
-        cur.execute("UPDATE chats SET status = 0 WHERE id = %s", (chat_id,))
-        conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE messages SET status = 0 WHERE chat_id = %s", (chat_id,))
+            cur.execute("UPDATE chats SET status = 0 WHERE id = %s", (chat_id,))
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
 
 def clear_chat_history(chat_id):
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE messages SET status = 0 WHERE chat_id = %s",
-            (chat_id,)
-        )
-        conn.commit()
-
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE messages SET status = 0 WHERE chat_id = %s", (chat_id,))
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
